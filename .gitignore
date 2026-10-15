@@ -1,0 +1,13 @@
+node_modules/
+build/
+dist/
+coverage/
+.ai-team/
+.upload-test-tmp/
+.DS_Store
+*.log
+.env*
+!.env.example
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

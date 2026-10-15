@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+/* Tailwind v4 uses the OS color scheme by default. StudyPilot's toggle owns
+   the `.dark` class on `<html>`, so dark utilities must follow that class. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  html {
+    background: #f1f5f9;
+  }
+
+  html.dark {
+    background: #020617;
+  }
+
+  body {
+    font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    min-width: 320px;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+/* Custom scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.4);
+}

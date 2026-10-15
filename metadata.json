@@ -1,0 +1,6 @@
+{
+  "name": "SynapseAI - Multimodal Adaptive Tutor & Study Companion",
+  "description": "A multimodal study companion for lecture videos, textbooks, and slide decks with source-cited tutoring and adaptive assessments.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
