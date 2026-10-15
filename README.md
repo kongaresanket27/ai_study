@@ -70,4 +70,4 @@ Study materials, topic progress, quiz history, and tutor chat are stored in brow
 - [Devpost project description draft](./DEVPOST_PROJECT_DESCRIPTION.md) — ready to adapt and paste into the project page.
 - [Hackathon demo script](./HACKATHON_DEMO_SCRIPT.md) — screen cues and a spoken walkthrough.
 
-Before submitting, publish this source tree to a **public GitHub repository** and add that repository URL to Devpost. Do not publish `.env`, the local `data/` directory, API keys, account databases, or private uploaded course materials.
+Public source repository: [github.com/kongaresanket27/ai_study](https://github.com/kongaresanket27/ai_study). Do not publish `.env`, the local `data/` directory, API keys, account databases, or private uploaded course materials.

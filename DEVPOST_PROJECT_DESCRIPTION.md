@@ -38,4 +38,6 @@ Accounts and sessions use a local SQLite database. Learning materials and progre
 
 ## Source code and setup
 
-**Public GitHub repository:** Add the public repository URL here after publishing the source. Its README should provide prerequisites, configuration, dependency installation, run commands, and current limitations.
+**Public GitHub repository:** https://github.com/kongaresanket27/ai_study
+
+The repository README provides prerequisites, configuration, dependency installation, run commands, and current limitations.
