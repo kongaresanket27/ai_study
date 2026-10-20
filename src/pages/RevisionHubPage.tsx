@@ -55,6 +55,7 @@ export const RevisionHubPage: React.FC<RevisionHubPageProps> = ({ store }) => {
     excerpt: unit.full_text_excerpt,
     figure_image_url: unit.figure_image_url,
     video_timestamp_seconds: unit.video_timestamp_seconds,
+    youtube_video_id: unit.youtube_video_id,
   };
 
   const move = (delta: number) => {

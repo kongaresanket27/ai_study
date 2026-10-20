@@ -21,9 +21,28 @@ import { CourseFlowMapPage } from './pages/CourseFlowMapPage';
 import { StudyPlanPage } from './pages/StudyPlanPage';
 import { RevisionHubPage } from './pages/RevisionHubPage';
 import { IngestionPage } from './pages/IngestionPage';
+import { LocalPythonPage } from './pages/LocalPythonPage';
 import { AuthPage } from './pages/AuthPage';
 import { Question, QuizSubmission } from './types';
 import { getCurrentSession, signOut } from './services/authProvider';
+
+const tabPaths: Record<NavTab, string> = {
+  dashboard: '/dashboard',
+  knowledge_base: '/courses',
+  tutor_chat: '/tutor',
+  quizzes: '/quizzes',
+  course_map: '/course-map',
+  study_plan: '/study-plan',
+  revision: '/revision',
+  ingestion: '/upload',
+  local_python: '/local-python',
+};
+
+function getTabFromPath(pathname: string): NavTab | undefined {
+  if (pathname === '/') return 'dashboard';
+  return (Object.entries(tabPaths) as Array<[NavTab, string]>)
+    .find(([, path]) => path === pathname)?.[0];
+}
 
 function createGuestWorkspaceId(): string {
   const workspaceId = crypto.randomUUID();
@@ -56,6 +75,7 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [authenticatedUserId, setAuthenticatedUserId] = useState<string | null>(null);
   const [authenticatedDisplayName, setAuthenticatedDisplayName] = useState<string>();
+  const [authenticatedEmail, setAuthenticatedEmail] = useState<string>();
   const [authSourceGuestWorkspaceId, setAuthSourceGuestWorkspaceId] = useState<string | null>(null);
   const [guestWorkspaceId, setGuestWorkspaceId] = useState(() =>
     accessMode === 'guest' ? getGuestWorkspaceId() : '',
@@ -77,7 +97,9 @@ export default function App() {
     applyQuizResultsToMastery,
   } = store;
 
-  const [activeTab, setActiveTab] = useState<NavTab>('dashboard');
+  const [activeTab, setActiveTab] = useState<NavTab>(() =>
+    getTabFromPath(window.location.pathname) || 'dashboard',
+  );
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileNavigationOpen, setIsMobileNavigationOpen] = useState(false);
   const [pendingTutorQuery, setPendingTutorQuery] = useState('');
@@ -90,6 +112,39 @@ export default function App() {
   const [lastSubmission, setLastSubmission] = useState<QuizSubmission | null>(null);
   const [preselectedQuizTopicId, setPreselectedQuizTopicId] = useState<string | undefined>(undefined);
 
+  const navigateToTab = (tab: NavTab) => {
+    const nextPath = tabPaths[tab];
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({ tab }, '', nextPath);
+    }
+    setActiveTab(tab);
+  };
+
+  useEffect(() => {
+    const currentPath = window.location.pathname;
+    const pathTab = getTabFromPath(currentPath);
+    if (!pathTab) {
+      window.history.replaceState({ tab: 'dashboard' }, '', tabPaths.dashboard);
+      setActiveTab('dashboard');
+    } else if (currentPath !== tabPaths[pathTab]) {
+      window.history.replaceState({ tab: pathTab }, '', tabPaths[pathTab]);
+    }
+
+    const syncTabWithPath = () => {
+      const tab = getTabFromPath(window.location.pathname);
+      if (tab) {
+        setActiveTab(tab);
+        setActiveQuizQuestions(null);
+        setLastSubmission(null);
+      } else {
+        window.history.replaceState({ tab: 'dashboard' }, '', tabPaths.dashboard);
+        setActiveTab('dashboard');
+      }
+    };
+    window.addEventListener('popstate', syncTabWithPath);
+    return () => window.removeEventListener('popstate', syncTabWithPath);
+  }, []);
+
   useEffect(() => {
     let isMounted = true;
     if (accessMode === 'guest') return;
@@ -99,6 +154,7 @@ export default function App() {
       if (session.authenticated && session.userId) {
         setAuthenticatedUserId(session.userId);
         setAuthenticatedDisplayName(session.displayName);
+        setAuthenticatedEmail(session.email);
         setAccessMode('authenticated');
       } else if (session.authenticated) {
         setAuthError('Your sign-in session did not include an account identifier. Please sign in again.');
@@ -122,7 +178,6 @@ export default function App() {
   }, [accessMode, authenticatedDisplayName, store.isStorageReady]);
 
   useEffect(() => {
-    setActiveTab('dashboard');
     setActiveQuizQuestions(null);
     setLastSubmission(null);
     setPendingTutorQuery('');
@@ -132,6 +187,7 @@ export default function App() {
   const continueAsGuest = () => {
     setAuthenticatedUserId(null);
     setAuthenticatedDisplayName(undefined);
+    setAuthenticatedEmail(undefined);
     setGuestWorkspaceId(authSourceGuestWorkspaceId || createGuestWorkspaceId());
     setAuthSourceGuestWorkspaceId(null);
     try {
@@ -140,7 +196,7 @@ export default function App() {
     setAccessMode('guest');
   };
 
-  const handleAuthenticated = (userId: string, displayName?: string) => {
+  const handleAuthenticated = (userId: string, displayName?: string, email?: string) => {
     if (authSourceGuestWorkspaceId) {
       store.transferGuestWorkspaceToAccount(authSourceGuestWorkspaceId, userId);
       setAuthSourceGuestWorkspaceId(null);
@@ -148,6 +204,7 @@ export default function App() {
     setAuthError('');
     setAuthenticatedUserId(userId);
     setAuthenticatedDisplayName(displayName);
+    setAuthenticatedEmail(email);
     try {
       sessionStorage.removeItem('studypilot_access_mode_v1');
     } catch {}
@@ -160,6 +217,7 @@ export default function App() {
       setAuthError('');
       setAuthenticatedUserId(null);
       setAuthenticatedDisplayName(undefined);
+      setAuthenticatedEmail(undefined);
       setAccessMode('choose');
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Could not sign out. Please try again.');
@@ -202,12 +260,12 @@ export default function App() {
     setPreselectedQuizTopicId(topicId);
     setActiveQuizQuestions(null);
     setLastSubmission(null);
-    setActiveTab('quizzes');
+    navigateToTab('quizzes');
   };
 
   const handleAskTutorWithQuery = (initialQuery?: string) => {
     setPendingTutorQuery(initialQuery || '');
-    setActiveTab('tutor_chat');
+    navigateToTab('tutor_chat');
   };
 
   if (accessMode === 'checking') {
@@ -229,9 +287,10 @@ export default function App() {
         store={store}
         onOpenSearch={() => setIsSearchModalOpen(true)}
         onOpenNavigation={() => setIsMobileNavigationOpen(true)}
-        onNavigateToIngestion={() => setActiveTab('ingestion')}
+        onNavigateToIngestion={() => navigateToTab('ingestion')}
         isGuest={accessMode === 'guest'}
         isAuthenticated={accessMode === 'authenticated'}
+        accountEmail={authenticatedEmail}
         onOpenAuth={() => {
           if (accessMode === 'guest') setAuthSourceGuestWorkspaceId(guestWorkspaceId);
           setAccessMode('choose');
@@ -245,7 +304,7 @@ export default function App() {
         <Sidebar
           activeTab={activeTab}
           setActiveTab={(tab) => {
-            setActiveTab(tab);
+            navigateToTab(tab);
             setActiveQuizQuestions(null);
             setLastSubmission(null);
           }}
@@ -263,15 +322,15 @@ export default function App() {
               store={store}
               onNavigateToQuiz={handleLaunchQuizForTopic}
               onNavigateToTutor={handleAskTutorWithQuery}
-              onNavigateToCourseMap={() => setActiveTab('course_map')}
-              onNavigateToIngestion={() => setActiveTab('ingestion')}
+              onNavigateToCourseMap={() => navigateToTab('course_map')}
+              onNavigateToIngestion={() => navigateToTab('ingestion')}
             />
           )}
 
           {activeTab === 'knowledge_base' && (
             <KnowledgeBasePage
               store={store}
-              onNavigateToIngestion={() => setActiveTab('ingestion')}
+              onNavigateToIngestion={() => navigateToTab('ingestion')}
               initialSelectedTopicId={selectedKnowledgeTopicId}
             />
           )}
@@ -281,7 +340,7 @@ export default function App() {
               store={store}
               initialQuery={pendingTutorQuery}
               onInitialQueryHandled={() => setPendingTutorQuery('')}
-              onNavigateToIngestion={() => setActiveTab('ingestion')}
+              onNavigateToIngestion={() => navigateToTab('ingestion')}
             />
           )}
 
@@ -302,14 +361,14 @@ export default function App() {
                   course={course}
                   onPracticeWeakTopics={(tId) => handleLaunchQuizForTopic(tId)}
                   onRetake={() => handleLaunchQuizForTopic()}
-                  onNavigateToRevision={() => setActiveTab('revision')}
-                  onNavigateToDashboard={() => setActiveTab('dashboard')}
+                  onNavigateToRevision={() => navigateToTab('revision')}
+                  onNavigateToDashboard={() => navigateToTab('dashboard')}
                 />
               ) : (
                 <QuizBuilderPage
                   store={store}
                   onStartQuiz={handleStartQuiz}
-                  onNavigateToIngestion={() => setActiveTab('ingestion')}
+                  onNavigateToIngestion={() => navigateToTab('ingestion')}
                   initialTopicId={preselectedQuizTopicId}
                 />
               )}
@@ -338,9 +397,11 @@ export default function App() {
           {activeTab === 'ingestion' && (
             <IngestionPage
               store={store}
-              onExploreKnowledgeBase={() => setActiveTab('knowledge_base')}
+              onExploreKnowledgeBase={() => navigateToTab('knowledge_base')}
             />
           )}
+
+          {activeTab === 'local_python' && <LocalPythonPage store={store} />}
 
         </main>
       </div>
@@ -360,7 +421,7 @@ export default function App() {
         onSelectUnit={(citation) => openCitation(citation)}
         onSelectTopic={(topicId) => {
           setSelectedKnowledgeTopicId(topicId);
-          setActiveTab('knowledge_base');
+          navigateToTab('knowledge_base');
         }}
       />
     </div>

@@ -4,7 +4,8 @@ StudyPilot is a student-facing workspace for learning from your own materials. U
 
 ## What students can do
 
-- Upload course materials and browse extracted topics and source excerpts in Courses.
+- Upload course materials or add a public YouTube video URL, then browse extracted topics and source excerpts in Courses.
+- Process PDFs, images, Office files, spreadsheets, text, and media locally with Python libraries in Python Local Lab.
 - Ask questions about uploaded content and open the supporting source citation.
 - Generate quizzes from uploaded source units and review results by topic.
 - Review source sections and follow a plan based on topic mastery and review timing; without an exam date, the planner creates a one-week schedule. Review actions open a source-grounded tutor session.
@@ -39,7 +40,7 @@ GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
 PORT=3000
 ```
 
-PDF, PPTX, and text extraction work without a Gemini key. Image analysis, video transcription, tutoring, and quiz generation require a configured key. Supported uploads are PDF, PPTX, TXT/Markdown, PNG/JPEG/WebP, and MP4/MOV/WebM files up to 25 MB each. Legacy `.ppt` files must be saved as `.pptx` first.
+PDF, PPTX, and text extraction work without a Gemini key. Image analysis, video transcription (including public YouTube URLs), tutoring, and quiz generation require a configured key. Supported uploads are PDF, PPTX, TXT/Markdown, PNG/JPEG/WebP, and MP4/MOV/WebM files up to 25 MB each. YouTube sources must be public; private and unlisted videos are not supported. Legacy `.ppt` files must be saved as `.pptx` first.
 
 ### Install and run
 
@@ -51,6 +52,21 @@ npm run dev
 ```
 
 Open the URL printed in the terminal (by default, [http://localhost:3000](http://localhost:3000)). Use the URL served by this command so the app and its sign-in API share the same address; opening a frontend-only server will not support local accounts.
+
+Each workspace section has a shareable URL that also works with browser refresh and back/forward navigation: `/dashboard`, `/courses`, `/tutor`, `/quizzes`, `/course-map`, `/study-plan`, `/revision`, and `/upload`.
+Python Local Lab is available at `/local-python`.
+
+### Local Python processing
+
+Python Local Lab runs local Python libraries through the app's local server bridge; it does not use Gemini or external AI APIs. It supports PDF, common image formats (with OCR), DOCX, PPTX, XLSX/XLSM, CSV, TXT/Markdown, and common audio/video formats. Results are extractive summaries and keyword-based topic labels rather than generated AI answers, and are added to Courses.
+
+Install Python 3.10–3.13, then install the processor libraries:
+
+```bash
+python -m pip install -r python/requirements.txt
+```
+
+The page offers metadata-only audio/video processing or optional local Whisper transcription. Whisper runs on the computer and downloads its small model on the first transcription; media is not sent to a cloud AI service. FFmpeg is provided by the Python `imageio-ffmpeg` dependency.
 
 To check TypeScript and build the production client:
 

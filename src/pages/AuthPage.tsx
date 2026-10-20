@@ -4,7 +4,7 @@ import { AuthMode, authenticate } from '../services/authProvider';
 
 interface AuthPageProps {
   onContinueAsGuest: () => void;
-  onAuthenticated: (userId: string, displayName?: string) => void;
+  onAuthenticated: (userId: string, displayName?: string, email?: string) => void;
   initialError?: string;
 }
 
@@ -45,7 +45,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onContinueAsGuest, onAuthent
       if (!result.userId) {
         throw new Error('The sign-in response did not include an account identifier. Please try again.');
       }
-      onAuthenticated(result.userId, result.displayName);
+      onAuthenticated(result.userId, result.displayName, result.email);
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'We could not complete that request. Please try again.');
     } finally {

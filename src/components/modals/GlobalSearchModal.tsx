@@ -4,7 +4,7 @@
  * content units, diagrams, video timestamps, and past quizzes.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Search, X, BookOpen, Presentation, Video, FileText, Image, ArrowRight } from 'lucide-react';
 import { Course, ContentUnit, Citation } from '../../types';
 
@@ -47,6 +47,16 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
 
     return { matchedUnits, matchedTopics };
   }, [query, course]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [isOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -137,6 +147,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                       excerpt: unit.full_text_excerpt,
                       figure_image_url: unit.figure_image_url,
                       video_timestamp_seconds: unit.video_timestamp_seconds,
+                      youtube_video_id: unit.youtube_video_id,
                     };
 
                     return (
@@ -149,7 +160,7 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
                         className="w-full flex items-start gap-3 p-2.5 rounded-xl hover:bg-slate-100 dark:hover:bg-slate-800/60 text-left transition-colors cursor-pointer group"
                       >
                         <div className="p-1.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 mt-0.5 shrink-0">
-                          {unit.source_type === 'video' ? (
+                          {unit.source_type === 'video' || unit.source_type === 'youtube' ? (
                             <Video className="w-3.5 h-3.5 text-rose-500" />
                           ) : unit.source_type === 'slide' ? (
                             <Presentation className="w-3.5 h-3.5 text-amber-500" />

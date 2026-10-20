@@ -194,6 +194,7 @@ export function registerLocalAuthRoutes(app: Express): void {
         authenticated: true,
         userId,
         displayName: displayNameForEmail(normalizedEmail),
+        email: normalizedEmail,
       });
     } catch (error) {
       if (typeof error === 'object' && error !== null && 'errcode' in error &&
@@ -236,6 +237,7 @@ export function registerLocalAuthRoutes(app: Express): void {
         authenticated: true,
         userId: user.id,
         displayName: displayNameForEmail(user.email),
+        email: user.email,
       });
     } catch (error) {
       console.error('Local sign-in failed:', error);
@@ -263,6 +265,7 @@ export function registerLocalAuthRoutes(app: Express): void {
       authenticated: true,
       userId: user.id,
       displayName: displayNameForEmail(user.email),
+      email: user.email,
     });
   });
 

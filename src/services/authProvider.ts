@@ -4,6 +4,7 @@ export interface AuthResult {
   authenticated: boolean;
   userId?: string;
   displayName?: string;
+  email?: string;
 }
 
 async function readResponse(response: Response): Promise<Record<string, unknown>> {
@@ -47,6 +48,7 @@ export async function authenticate(
     authenticated: true,
     userId: payload.userId,
     displayName: typeof payload.displayName === 'string' ? payload.displayName : undefined,
+    email: typeof payload.email === 'string' ? payload.email : undefined,
   };
 }
 
@@ -60,6 +62,7 @@ export async function getCurrentSession(): Promise<AuthResult> {
     authenticated: payload.authenticated === true,
     userId: typeof payload.userId === 'string' ? payload.userId : undefined,
     displayName: typeof payload.displayName === 'string' ? payload.displayName : undefined,
+    email: typeof payload.email === 'string' ? payload.email : undefined,
   };
 }
 

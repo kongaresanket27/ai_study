@@ -99,6 +99,7 @@ export function retrieveContextUnits(
     excerpt: u.full_text_excerpt,
     figure_image_url: u.figure_image_url,
     video_timestamp_seconds: u.video_timestamp_seconds,
+    youtube_video_id: u.youtube_video_id,
   }));
 
   const retrievalSummary = isOutsideCourseMaterial

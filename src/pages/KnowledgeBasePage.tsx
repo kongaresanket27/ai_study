@@ -57,7 +57,11 @@ export const KnowledgeBasePage: React.FC<KnowledgeBasePageProps> = ({
       // Source type match
       if (selectedSourceType !== 'all') {
         if (selectedSourceType === 'figure' && !unit.is_figure) return false;
-        if (selectedSourceType !== 'figure' && unit.source_type !== selectedSourceType) return false;
+        if (selectedSourceType === 'video') {
+          if (unit.source_type !== 'video' && unit.source_type !== 'youtube') return false;
+        } else if (selectedSourceType !== 'figure' && unit.source_type !== selectedSourceType) {
+          return false;
+        }
       }
       // Search match
       if (searchQuery.trim()) {
@@ -82,6 +86,7 @@ export const KnowledgeBasePage: React.FC<KnowledgeBasePageProps> = ({
       excerpt: unit.full_text_excerpt,
       figure_image_url: unit.figure_image_url,
       video_timestamp_seconds: unit.video_timestamp_seconds,
+      youtube_video_id: unit.youtube_video_id,
     };
     openCitation(citation);
   };

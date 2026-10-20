@@ -14,10 +14,38 @@ import {
   Sparkles,
   ArrowRight,
   Loader2,
-  Layers,
   X,
+  Link2,
 } from 'lucide-react';
 import { useAppStore } from '../store/useStore';
+
+function getYouTubeVideoId(value: string): string | null {
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || ![
+      'youtube.com',
+      'www.youtube.com',
+      'm.youtube.com',
+      'youtu.be',
+      'youtube-nocookie.com',
+      'www.youtube-nocookie.com',
+    ].includes(url.hostname.toLowerCase())) {
+      return null;
+    }
+
+    const pathParts = url.pathname.split('/').filter(Boolean);
+    const videoId = url.hostname.toLowerCase() === 'youtu.be'
+      ? pathParts[0]
+      : pathParts[0] === 'watch'
+        ? url.searchParams.get('v')
+        : ['shorts', 'embed', 'live', 'v'].includes(pathParts[0] || '')
+          ? pathParts[1]
+          : null;
+    return videoId && /^[A-Za-z0-9_-]{11}$/.test(videoId) ? videoId : null;
+  } catch {
+    return null;
+  }
+}
 
 interface IngestionPageProps {
   store: ReturnType<typeof useAppStore>;
@@ -31,6 +59,9 @@ export const IngestionPage: React.FC<IngestionPageProps> = ({
   const { addIngestedContent, course } = store;
 
   const [files, setFiles] = useState<Array<{ name: string; size: string; type: string; file?: File }>>([]);
+  const [videoUrls, setVideoUrls] = useState<Array<{ url: string; videoId: string }>>([]);
+  const [videoUrlInput, setVideoUrlInput] = useState('');
+  const [videoUrlError, setVideoUrlError] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [extractionLog, setExtractionLog] = useState<string[]>([]);
@@ -47,18 +78,19 @@ export const IngestionPage: React.FC<IngestionPageProps> = ({
 
   const handleStartIngestion = async () => {
     const actualFiles = files.filter((file) => file.file);
-    if (!actualFiles.length) {
-      setExtractionLog(['Please add at least one supported file before starting ingestion.']);
+    const sourceCount = actualFiles.length + videoUrls.length;
+    if (!sourceCount) {
+      setExtractionLog(['Please add at least one supported file or public YouTube video URL before starting ingestion.']);
       return;
     }
 
     setIsProcessing(true);
     setIsCompleted(false);
     setCurrentStepIndex(0);
-    setIngestionStats({ totalTopics: 0, totalUnits: 0, sourceFiles: actualFiles.length, multimediaUnits: 0 });
+    setIngestionStats({ totalTopics: 0, totalUnits: 0, sourceFiles: sourceCount, multimediaUnits: 0 });
     setExtractionLog([
-      `Uploading ${actualFiles.length} study material file(s) to ${course.title}...`,
-      'Files are processed in parallel, up to 3 at a time. Processing time varies by file size and video duration.',
+      `Processing ${sourceCount} study material source(s) for ${course.title}...`,
+      'Sources are processed in parallel, up to 3 at a time. Processing time varies by file size and video duration.',
     ]);
 
     try {
@@ -66,9 +98,10 @@ export const IngestionPage: React.FC<IngestionPageProps> = ({
       actualFiles.forEach(({ file }) => {
         if (file) formData.append('files', file);
       });
+      formData.append('videoUrls', JSON.stringify(videoUrls.map(({ url }) => url)));
 
       setCurrentStepIndex(1);
-      setExtractionLog((prev) => [...prev, 'Extracting text and analyzing media in parallel (maximum 3 files at once)...']);
+      setExtractionLog((prev) => [...prev, 'Extracting text and analyzing media in parallel (maximum 3 sources at once)...']);
 
       const response = await fetch('/api/upload-materials', {
         method: 'POST',
@@ -95,7 +128,7 @@ export const IngestionPage: React.FC<IngestionPageProps> = ({
       setIngestionStats({
         totalTopics: data.totalTopics || 0,
         totalUnits: data.totalUnits || 0,
-        sourceFiles: actualFiles.length,
+        sourceFiles: sourceCount,
         multimediaUnits: data.multimediaUnits || 0,
       });
       setExtractionLog((prev) => [
@@ -127,6 +160,25 @@ export const IngestionPage: React.FC<IngestionPageProps> = ({
       addFiles(Array.from(e.target.files));
       e.target.value = '';
     }
+  };
+
+  const handleAddVideoUrl = () => {
+    const videoId = getYouTubeVideoId(videoUrlInput.trim());
+    if (!videoId) {
+      setVideoUrlError('Enter a valid HTTPS YouTube video URL.');
+      return;
+    }
+    if (videoUrls.some((video) => video.videoId === videoId)) {
+      setVideoUrlError('That YouTube video is already queued.');
+      return;
+    }
+
+    setVideoUrls((previous) => [
+      ...previous,
+      { videoId, url: `https://www.youtube.com/watch?v=${videoId}` },
+    ]);
+    setVideoUrlInput('');
+    setVideoUrlError('');
   };
 
   const addFiles = (incoming: File[]) => {
@@ -164,7 +216,7 @@ export const IngestionPage: React.FC<IngestionPageProps> = ({
           Multimodal Course Material Ingestion
         </h1>
         <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-          Upload PDFs, PowerPoint presentations (.pptx), text or Markdown notes, images, or lecture videos. PowerPoint slide text is extracted with slide citations.
+          Upload files or add a public YouTube video URL. PowerPoint slide text is extracted with slide citations.
         </p>
       </div>
 
@@ -204,15 +256,48 @@ export const IngestionPage: React.FC<IngestionPageProps> = ({
             </p>
           </label>
 
+          <div className="rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 p-5 space-y-3">
+            <label htmlFor="youtube-video-url" className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
+              <Link2 className="h-4 w-4 text-rose-500" />
+              Add a YouTube video URL
+            </label>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                id="youtube-video-url"
+                type="url"
+                value={videoUrlInput}
+                onChange={(event) => {
+                  setVideoUrlInput(event.target.value);
+                  setVideoUrlError('');
+                }}
+                placeholder="https://www.youtube.com/watch?v=..."
+                aria-describedby="youtube-video-help"
+                className="min-w-0 flex-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 px-3 py-2.5 text-sm text-slate-900 dark:text-white outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20"
+              />
+              <button
+                type="button"
+                onClick={handleAddVideoUrl}
+                disabled={!videoUrlInput.trim()}
+                className="rounded-xl bg-slate-100 dark:bg-slate-800 px-4 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Add video
+              </button>
+            </div>
+            <p id="youtube-video-help" className="text-xs text-slate-500 dark:text-slate-400">
+              Public YouTube videos only. Private and unlisted videos are not supported.
+            </p>
+            {videoUrlError && <p role="alert" className="text-xs text-rose-600 dark:text-rose-400">{videoUrlError}</p>}
+          </div>
+
           {/* Queued Files List */}
           <div className="space-y-3">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500">
-              Queued Materials for Ingestion ({files.length} items)
+              Queued Materials for Ingestion ({files.length + videoUrls.length} items)
             </h3>
             <div className="space-y-2">
               {files.map((file, idx) => (
                 <div
-                  key={idx}
+                  key={`${file.name}-${idx}`}
                   className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs"
                 >
                   <div className="flex items-center gap-3 truncate">
@@ -240,13 +325,33 @@ export const IngestionPage: React.FC<IngestionPageProps> = ({
                   </button>
                 </div>
               ))}
+              {videoUrls.map((video) => (
+                <div
+                  key={video.videoId}
+                  className="p-3.5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs"
+                >
+                  <div className="flex min-w-0 items-center gap-3">
+                    <Video className="w-4 h-4 text-rose-500 shrink-0" />
+                    <span className="font-semibold text-slate-800 dark:text-slate-200 truncate">{video.url}</span>
+                  </div>
+                  <span className="text-[11px] text-slate-400 shrink-0">YouTube</span>
+                  <button
+                    type="button"
+                    onClick={() => setVideoUrls((previous) => previous.filter((queued) => queued.videoId !== video.videoId))}
+                    aria-label={`Remove YouTube video ${video.videoId} from ingestion queue`}
+                    className="ml-2 rounded p-1 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
             </div>
           </div>
 
           {/* Start Pipeline CTA */}
           <button
             onClick={handleStartIngestion}
-            disabled={files.length === 0}
+            disabled={files.length + videoUrls.length === 0}
             className="w-full py-3.5 rounded-xl text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50 shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
           >
             <Sparkles className="w-4 h-4" />
@@ -342,7 +447,7 @@ export const IngestionPage: React.FC<IngestionPageProps> = ({
             </div>
             <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800">
               <p className="text-2xl font-black text-emerald-400 tabular-nums">{ingestionStats.sourceFiles}</p>
-              <p className="text-[11px] text-slate-400 font-semibold uppercase mt-1">Files Processed</p>
+              <p className="text-[11px] text-slate-400 font-semibold uppercase mt-1">Sources Processed</p>
             </div>
             <div className="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800">
               <p className="text-2xl font-black text-indigo-400 tabular-nums">{ingestionStats.multimediaUnits}</p>

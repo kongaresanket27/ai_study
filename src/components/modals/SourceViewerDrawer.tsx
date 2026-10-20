@@ -119,8 +119,21 @@ export const SourceViewerDrawer: React.FC<SourceViewerDrawerProps> = ({
                 <span>Transcript timestamp: {citation.source_location}</span>
               </div>
               <p className="text-[11px] text-slate-600 dark:text-slate-400">
-                This citation points to the transcript segment in the uploaded video. The original video is not retained for playback.
+                {citation.source_type === 'youtube'
+                  ? 'This citation points to the matching segment in the public YouTube video.'
+                  : 'This citation points to the transcript segment in the uploaded video. The original video is not retained for playback.'}
               </p>
+              {citation.youtube_video_id && (
+                <a
+                  href={`https://www.youtube.com/watch?v=${citation.youtube_video_id}&t=${Math.floor(citation.video_timestamp_seconds || 0)}s`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-700 hover:underline dark:text-rose-300"
+                >
+                  Watch video at this timestamp
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </a>
+              )}
             </div>
           )}
 

@@ -14,6 +14,7 @@ import {
   Calendar,
   Layers,
   UploadCloud,
+  Cpu,
   ChevronLeft,
   ChevronRight,
   GraduationCap,
@@ -27,7 +28,8 @@ export type NavTab =
   | 'course_map'
   | 'study_plan'
   | 'revision'
-  | 'ingestion';
+  | 'ingestion'
+  | 'local_python';
 
 interface SidebarProps {
   activeTab: NavTab;
@@ -57,6 +59,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'study_plan' as NavTab, label: 'Study Planner', icon: Calendar },
     { id: 'revision' as NavTab, label: 'Revision Hub', icon: Layers },
     { id: 'ingestion' as NavTab, label: 'Upload Materials', icon: UploadCloud },
+    { id: 'local_python' as NavTab, label: 'Python Local Lab', icon: Cpu },
   ];
 
   return (

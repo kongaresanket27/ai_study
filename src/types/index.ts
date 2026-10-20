@@ -171,6 +171,7 @@ export interface Citation {
   excerpt: string;
   figure_image_url?: string;
   video_timestamp_seconds?: number;
+  youtube_video_id?: string;
 }
 
 export interface ChatMessage {

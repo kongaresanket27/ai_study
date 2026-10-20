@@ -6,7 +6,10 @@
 
 import express from 'express';
 import multer from 'multer';
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -28,6 +31,48 @@ const upload = multer({
     fileSize: 25 * 1024 * 1024,
   },
 });
+
+const localPythonProcessorPath = path.join(__dirname, 'python', 'local_processor.py');
+const localPythonSupportedExtensions = new Set([
+  '.pdf', '.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tif', '.tiff', '.gif',
+  '.docx', '.pptx', '.xlsx', '.xlsm', '.csv', '.txt', '.md',
+  '.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac', '.mp4', '.mov', '.webm', '.mkv', '.avi',
+]);
+
+function runLocalPythonProcessor(args: string[], input: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const pythonCommand = process.env.STUDYPILOT_PYTHON || 'python';
+    const child = spawn(pythonCommand, [localPythonProcessorPath, ...args], {
+      cwd: __dirname,
+      windowsHide: true,
+      env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+    });
+    let stdout = '';
+    let stderr = '';
+    const timeout = setTimeout(() => {
+      child.kill();
+      reject(new Error('Local Python processing timed out. Try fewer files or shorter audio/video.'));
+    }, 30 * 60 * 1000);
+
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => { stdout += chunk; });
+    child.stderr.on('data', (chunk: string) => { stderr += chunk; });
+    child.once('error', (error) => {
+      clearTimeout(timeout);
+      reject(new Error(`Could not start the local Python processor. Install Python 3 and the project requirements. ${error.message}`));
+    });
+    child.once('close', (code) => {
+      clearTimeout(timeout);
+      if (code !== 0) {
+        reject(new Error(stderr.trim() || `The local Python processor exited with code ${code ?? 'unknown'}.`));
+        return;
+      }
+      resolve(stdout);
+    });
+    child.stdin.end(input);
+  });
+}
 
 app.use(express.json({ limit: '50mb' }));
 registerLocalAuthRoutes(app);
@@ -223,6 +268,61 @@ function formatTimestamp(seconds: number): string {
     : `${minutes}:${String(remainingSeconds).padStart(2, '0')}`;
 }
 
+interface VideoSegment {
+  start_seconds?: number;
+  transcript?: string;
+  visual_description?: string;
+  concepts?: string[];
+}
+
+interface VideoAnalysis {
+  segments?: VideoSegment[];
+}
+
+function parseYouTubeVideoUrl(value: unknown): { videoId: string; url: string } {
+  if (typeof value !== 'string' || value.length > 2048) {
+    throw new Error('Each video source must be a valid YouTube URL.');
+  }
+
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(value);
+  } catch {
+    throw new Error('Enter a valid YouTube video URL.');
+  }
+
+  const supportedHosts = new Set([
+    'youtube.com',
+    'www.youtube.com',
+    'm.youtube.com',
+    'youtu.be',
+    'youtube-nocookie.com',
+    'www.youtube-nocookie.com',
+  ]);
+  if (parsedUrl.protocol !== 'https:' || !supportedHosts.has(parsedUrl.hostname.toLowerCase()) ||
+      parsedUrl.username || parsedUrl.password) {
+    throw new Error('Only HTTPS links to YouTube videos are supported.');
+  }
+
+  const pathParts = parsedUrl.pathname.split('/').filter(Boolean);
+  const videoId = parsedUrl.hostname.toLowerCase() === 'youtu.be'
+    ? pathParts[0]
+    : pathParts[0] === 'watch'
+      ? parsedUrl.searchParams.get('v') || undefined
+      : ['shorts', 'embed', 'live', 'v'].includes(pathParts[0] || '')
+        ? pathParts[1]
+        : undefined;
+
+  if (!videoId || !/^[A-Za-z0-9_-]{11}$/.test(videoId)) {
+    throw new Error('Enter a YouTube video URL with a valid video ID.');
+  }
+
+  return {
+    videoId,
+    url: `https://www.youtube.com/watch?v=${videoId}`,
+  };
+}
+
 async function analyzeVisualFile(file: Express.Multer.File) {
   const uploaded = await uploadGeminiFile(file);
   if (!ai || !uploaded.uri || !uploaded.name) {
@@ -253,12 +353,62 @@ async function analyzeVisualFile(file: Express.Multer.File) {
         temperature: 0.1,
       },
     });
-    return parseGeminiJson<{ figures?: Array<{ page?: number | null; caption?: string; description?: string; visible_text?: string; concepts?: string[] }>; segments?: Array<{ start_seconds?: number; transcript?: string; visual_description?: string; concepts?: string[] }> }>(response.text, file.originalname);
+    return parseGeminiJson<{ figures?: Array<{ page?: number | null; caption?: string; description?: string; visible_text?: string; concepts?: string[] }>; segments?: VideoSegment[] }>(response.text, file.originalname);
   } finally {
     await ai.files.delete({ name: uploadedName }).catch((error) => {
       console.warn(`Could not delete temporary Gemini upload ${uploadedName}:`, error);
     });
   }
+}
+
+async function analyzeYouTubeVideo(videoUrl: string): Promise<VideoAnalysis> {
+  if (!ai) {
+    throw new Error('YouTube video transcription requires GEMINI_API_KEY on the server.');
+  }
+
+  const prompt = 'Analyze this public educational YouTube video. Transcribe the spoken educational content and split it into short, meaningful consecutive segments. For each segment, include its start time in seconds, a faithful transcript, a concise description of relevant on-screen teaching/diagrams when present, and 1-5 concepts. Return only JSON: {"segments":[{"start_seconds":0,"transcript":"...","visual_description":"...","concepts":["..."]}]}. Do not invent words or timestamps. Use an empty visual_description when none is relevant.';
+  const response = await generateWithTransientRetry(ai, (client) => client.interactions.create({
+    model: 'gemini-3.8-flash',
+    input: [
+      { type: 'text', text: prompt },
+      { type: 'video', uri: videoUrl },
+    ],
+  }));
+
+  return parseGeminiJson<VideoAnalysis>(response.output_text, videoUrl);
+}
+
+function createVideoUnits(
+  sourceFile: string,
+  topic: { id: string; title: string },
+  segments: VideoSegment[],
+  sourceType: 'video' | 'youtube',
+  youtubeVideoId?: string,
+) {
+  return segments.flatMap((segment) => {
+    const transcript = segment.transcript?.trim();
+    const startSeconds = Number(segment.start_seconds);
+    if (!transcript || !Number.isFinite(startSeconds) || startSeconds < 0) return [];
+    const visualDescription = segment.visual_description?.trim();
+    const excerpt = [transcript, visualDescription && `Visual: ${visualDescription}`].filter(Boolean).join('\n');
+
+    return [{
+      id: `uploaded-video-${randomUUID()}`,
+      title: `Lecture segment at ${formatTimestamp(startSeconds)}`,
+      summary: toSentenceCase(excerpt),
+      full_text_excerpt: excerpt,
+      topic_id: topic.id,
+      topic_name: topic.title,
+      subtopic: 'Lecture transcript',
+      concept_tags: segment.concepts?.length ? segment.concepts.slice(0, 5) : getConceptTags(excerpt),
+      difficulty: 'medium' as const,
+      source_type: sourceType,
+      source_file: sourceFile,
+      source_location: formatTimestamp(startSeconds),
+      video_timestamp_seconds: startSeconds,
+      ...(youtubeVideoId ? { youtube_video_id: youtubeVideoId } : {}),
+    }];
+  });
 }
 
 function createVisualUnits(
@@ -296,29 +446,9 @@ function createVisualUnits(
     };
   });
 
-  const segments = (analysis.segments || []).flatMap((segment, index) => {
-    const transcript = segment.transcript?.trim();
-    const startSeconds = Number(segment.start_seconds);
-    if (!transcript || !Number.isFinite(startSeconds) || startSeconds < 0) return [];
-    const visualDescription = segment.visual_description?.trim();
-    const excerpt = [transcript, visualDescription && `Visual: ${visualDescription}`].filter(Boolean).join('\n');
-
-    return [{
-      id: `uploaded-video-${randomUUID()}`,
-      title: `Lecture segment at ${formatTimestamp(startSeconds)}`,
-      summary: toSentenceCase(excerpt),
-      full_text_excerpt: excerpt,
-      topic_id: topic.id,
-      topic_name: topic.title,
-      subtopic: 'Lecture transcript',
-      concept_tags: segment.concepts?.length ? segment.concepts.slice(0, 5) : getConceptTags(excerpt),
-      difficulty: 'medium' as const,
-      source_type: 'video' as const,
-      source_file: fileName,
-      source_location: formatTimestamp(startSeconds),
-      video_timestamp_seconds: startSeconds,
-    }];
-  });
+  const segments = sourceType === 'video'
+    ? createVideoUnits(fileName, topic, analysis.segments || [], 'video')
+    : [];
 
   return [...figures, ...segments];
 }
@@ -420,18 +550,105 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-app.post('/api/upload-materials', upload.array('files', 10), async (req, res) => {
+app.get('/api/local-python/status', async (_req, res) => {
+  try {
+    const output = await runLocalPythonProcessor(['--check'], '');
+    const status = JSON.parse(output) as { python: string; dependencies: Record<string, boolean> };
+    res.json({ available: true, ...status });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not check the local Python processor.';
+    res.status(503).json({ available: false, error: message });
+  }
+});
+
+app.post('/api/local-python/process', upload.array('files', 10), async (req, res) => {
+  let temporaryDirectory: string | undefined;
   try {
     const files = Array.isArray(req.files) ? req.files : [];
     if (!files.length) {
-      return res.status(400).json({ error: 'No files were uploaded.' });
+      return res.status(400).json({ error: 'Choose at least one file for local Python processing.' });
+    }
+    if (files.length > 10) {
+      return res.status(400).json({ error: 'Process no more than 10 files at a time.' });
+    }
+    const audioMode = req.body.audioMode;
+    if (audioMode !== 'metadata' && audioMode !== 'whisper') {
+      return res.status(400).json({ error: 'Choose metadata-only or local Whisper audio/video processing.' });
+    }
+
+    for (const file of files) {
+      const extension = path.extname(file.originalname).toLowerCase();
+      if (!localPythonSupportedExtensions.has(extension)) {
+        return res.status(400).json({
+          error: `Unsupported file type for ${file.originalname}. Choose PDF, image, Office, CSV, text, audio, or video files.`,
+        });
+      }
+    }
+
+    temporaryDirectory = await mkdtemp(path.join(os.tmpdir(), 'studypilot-python-'));
+    const manifest = await Promise.all(files.map(async (file, index) => {
+      const extension = path.extname(file.originalname).toLowerCase();
+      const storedName = `material-${index}${extension}`;
+      const filePath = path.join(temporaryDirectory as string, storedName);
+      await writeFile(filePath, file.buffer, { flag: 'wx' });
+      return { name: path.basename(file.originalname.replace(/\\/g, '/')), path: filePath };
+    }));
+
+    const output = await runLocalPythonProcessor([], JSON.stringify({ files: manifest, audioMode }));
+    let result: unknown;
+    try {
+      result = JSON.parse(output);
+    } catch {
+      throw new Error('The Python processor returned an invalid result. Check the local processor installation and retry.');
+    }
+    if (typeof result !== 'object' || result === null ||
+        !Array.isArray((result as { topics?: unknown }).topics) ||
+        !Array.isArray((result as { units?: unknown }).units)) {
+      throw new Error('The Python processor returned an incomplete result.');
+    }
+    res.json(result);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Local Python processing failed.';
+    console.error('Local Python processing failed:', error);
+    res.status(500).json({ error: message });
+  } finally {
+    if (temporaryDirectory) {
+      try {
+        await rm(temporaryDirectory, { recursive: true, force: true });
+      } catch (error) {
+        console.warn(`Could not clean up temporary local Python files in ${temporaryDirectory}:`, error);
+      }
+    }
+  }
+});
+
+app.post('/api/upload-materials', upload.array('files', 10), async (req, res) => {
+  try {
+    const files = Array.isArray(req.files) ? req.files : [];
+    let videoUrls: Array<{ videoId: string; url: string }>;
+    try {
+      const requestedUrls = req.body.videoUrls === undefined ? [] : JSON.parse(req.body.videoUrls);
+      if (!Array.isArray(requestedUrls)) {
+        throw new Error('Video URLs must be submitted as a list.');
+      }
+      videoUrls = requestedUrls.map(parseYouTubeVideoUrl);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Video URLs must be submitted as a valid list.';
+      return res.status(400).json({ error: message });
+    }
+
+    if (files.length + videoUrls.length > 10) {
+      return res.status(400).json({ error: 'Add no more than 10 files and video URLs per ingestion.' });
+    }
+    if (!files.length && !videoUrls.length) {
+      return res.status(400).json({ error: 'Add at least one file or public YouTube video URL.' });
     }
 
     const multimodalFiles = files.filter((file) => {
       const mimeType = getMimeType(file);
       return mimeType.startsWith('image/') || mimeType.startsWith('video/');
     });
-    if (multimodalFiles.length > 0 && !ai) {
+    if ((multimodalFiles.length > 0 || videoUrls.length > 0) && !ai) {
       return res.status(503).json({
         error: 'Image analysis and video transcription require GEMINI_API_KEY. Add a valid key to the server .env file and restart the app.',
       });
@@ -531,9 +748,47 @@ app.post('/api/upload-materials', upload.array('files', 10), async (req, res) =>
       }
     });
 
-    const topics = fileResults.flatMap((result) => result.topics);
-    const units = fileResults.flatMap((result) => result.units);
-    const warnings = fileResults.flatMap((result) => result.warnings);
+    const videoResults = await mapWithConcurrency(videoUrls, 3, async ({ videoId, url }) => {
+      const topicTitle = `YouTube video ${videoId}`;
+      const topic = {
+        id: `uploaded-topic-youtube-${videoId}-${randomUUID()}`,
+        title: topicTitle,
+      };
+
+      try {
+        const analysis = await analyzeYouTubeVideo(url);
+        const units = createVideoUnits(url, topic, analysis.segments || [], 'youtube', videoId);
+        if (!units.length) {
+          return {
+            topics: [],
+            units: [],
+            warnings: [`No timestamped speech segments were detected in ${url}.`],
+          };
+        }
+        return {
+          topics: [{
+            ...topic,
+            description: `Timestamped transcript from the public YouTube video ${url}.`,
+            subtopics: ['Lecture transcript'],
+            concepts: Array.from(new Set(units.flatMap((unit) => unit.concept_tags))).slice(0, 12),
+            estimated_study_minutes: Math.max(15, Math.min(120, units.length * 5)),
+            prerequisite_ids: [],
+            unit_count: units.length,
+          }],
+          units,
+          warnings: [],
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown processing error';
+        console.error(`Failed to process YouTube video ${url}:`, error);
+        return { topics: [], units: [], warnings: [`Could not process ${url}: ${message}`] };
+      }
+    });
+
+    const results = [...fileResults, ...videoResults];
+    const topics = results.flatMap((result) => result.topics);
+    const units = results.flatMap((result) => result.units);
+    const warnings = results.flatMap((result) => result.warnings);
 
     if (!units.length) {
       return res.status(422).json({
@@ -543,13 +798,14 @@ app.post('/api/upload-materials', upload.array('files', 10), async (req, res) =>
     }
 
     res.json({
-      message: `Processed ${files.length} file(s) with up to 3 running concurrently; extracted ${units.length} source-grounded content unit(s).`,
+      message: `Processed ${files.length + videoUrls.length} source(s) with up to 3 running concurrently; extracted ${units.length} source-grounded content unit(s).`,
       topics,
       units,
       totalUnits: units.length,
       totalTopics: topics.length,
       multimediaUnits: units.filter((unit) => unit.is_figure || typeof unit.video_timestamp_seconds === 'number').length,
       uploadedFiles: files.map((file) => file.originalname),
+      processedVideoUrls: videoUrls.map(({ url }) => url),
       warnings,
     });
   } catch (err: any) {
@@ -724,11 +980,21 @@ app.post('/api/generate-quiz', async (req, res) => {
 // Answer Grading Endpoint
 app.post('/api/grade-answer', async (req, res) => {
   try {
-    const { question, userAnswer } = req.body;
-
     if (!ai) {
       return res.status(503).json({ error: 'GEMINI_API_KEY not configured' });
     }
+
+    const body = req.body;
+    if (typeof body !== 'object' || body === null ||
+        typeof body.question !== 'object' || body.question === null ||
+        typeof body.question.question !== 'string' || !body.question.question.trim() ||
+        typeof body.question.worked_solution !== 'string' || !body.question.worked_solution.trim() ||
+        typeof body.userAnswer !== 'string' || !body.userAnswer.trim()) {
+      return res.status(400).json({
+        error: 'A question, worked solution, and non-empty student answer are required for grading.',
+      });
+    }
+    const { question, userAnswer } = body;
 
     const prompt = `Question: "${question.question}"
 Correct Answer / Worked Solution: "${question.worked_solution}"
